@@ -13,8 +13,54 @@ function tasks(group){let c=card('每日任务'),ts=s.tasks.filter(t=>t.date===d
 function stats(){let w=s.words[date]||[],a=w.map(x=>s.answers[date]?.[x.id]).filter(Boolean);return {total:w.length,done:a.length,correct:a.filter(x=>x.ok).length}}
 function quiz(){let c=card('单词训练'),z=stats();add(c,el('p',`今日 ${z.total} 词 · 已完成 ${z.done} · 正确率 ${pct(z.correct,z.done)}%`),bar(pct(z.done,z.total)));let all=s.words[date]||[],ws=all.filter(w=>filter==='all'||(filter==='review'?w.review:!w.review));let r=el('div',undefined,'line');for(let [k,v] of [['all','全部'],['new','新词'],['review','复习词']])r.append(btn(v,()=>{filter=k;cursor=0;render()},filter===k?'active':''));c.append(r);if(!ws.length){c.append(el('p','暂无此类单词，请导入单词。'));return c}cursor=Math.min(cursor,ws.length-1);let w=ws[cursor],a=s.answers[date]?.[w.id];add(c,el('p',`${cursor+1}/${ws.length} · ${w.review?'复习词':'新词'} · ${s.mastery[w.word.toLowerCase()]?.status||'未练习'}`,'muted'),el('div',w.word,'word'),el('p',w.phonetic||''));if('speechSynthesis'in window)c.append(btn('朗读单词',()=>{let u=new SpeechSynthesisUtterance(w.word);u.lang='en-US';speechSynthesis.speak(u)}));let opts=el('div',undefined,'options');w.options.forEach((v,i)=>{let b=btn(String.fromCharCode(65+i)+'. '+v,()=>{let ok=i===w.correctIndex;(s.answers[date]??={})[w.id]={selected:i,ok};s.mastery[w.word.toLowerCase()]={status:ok?'已答对':'待复习',date};save();render()},a?(i===w.correctIndex?'correct':i===a.selected?'wrong':''):'');b.disabled=!!a;opts.append(b)});c.append(opts);if(a)add(c,el('p',a.ok?'✓ 回答正确':'× 回答错误'),el('p',`正确答案：${w.meaning} ${w.partOfSpeech||''}`),el('p','例句：'+(w.example||'未提供')),el('p','备注：'+(w.note||'无')));add(c,add(el('div',undefined,'line'),btn('上一词',()=>{cursor=Math.max(0,cursor-1);render()}),btn('下一词',()=>{cursor=(cursor+1)%ws.length;render()},'primary'),btn('重练本词',()=>{if(s.answers[date])delete s.answers[date][w.id];save();render()})));return c}
 const fallback=['获得','推迟','保护','减少','观察','解释','增加','选择','拒绝'];function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
-function importWords(raw){let data=JSON.parse(raw);if(!/^\d{4}-\d{2}-\d{2}$/.test(data.date)||!Number.isFinite(Date.parse(data.date))||new Date(data.date).toISOString().slice(0,10)!==data.date||!Array.isArray(data.words)||!data.words.length)throw Error('需要有效 date 和非空 words 数组');let seen=new Set(),pool=[...data.words.map(w=>w.meaning),...fallback].filter(x=>typeof x==='string'&&x.trim());let list=data.words.map(w=>{if(typeof w.word!=='string'||!w.word.trim()||typeof w.meaning!=='string'||!w.meaning.trim())throw Error('每个单词必须有 word 和 meaning');let word=w.word.trim(),meaning=w.meaning.trim(),k=word.toLowerCase();if(seen.has(k))throw Error('重复单词：'+word);seen.add(k);let options=w.options;if(options===undefined)options=shuffle([meaning,...shuffle([...new Set(pool)].filter(x=>x!==meaning)).slice(0,3)]);if(!Array.isArray(options)||options.length!==4||new Set(options).size!==4||options.some(x=>typeof x!=='string'||!x.trim())||!options.includes(meaning))throw Error(word+' 的选项必须为四个不同释义，包含 meaning');let correctIndex=options.indexOf(meaning);if(w.correctIndex!==undefined&&w.correctIndex!==correctIndex)throw Error(word+' 的 correctIndex 与 meaning 不一致');return {id:uid(),word,meaning,options,correctIndex,phonetic:String(w.phonetic||''),partOfSpeech:String(w.partOfSpeech||''),example:String(w.example||''),note:String(w.note||''),review:typeof w.review==='boolean'?w.review:Object.entries(s.words).some(([d,ws])=>d<data.date&&ws.some(x=>x.word.toLowerCase()===k))}});if(s.words[data.date]&&!confirm('覆盖该日期单词及答题记录？'))return;s.words[data.date]=list;s.answers[data.date]={};date=data.date;$('date').value=date;cursor=0;filter='all';page='cet';save();render()}
-function upload(){let c=card('导入每日单词'),a=area('','粘贴 JSON 单词数据'),f=field('','选择 JSON 文件','file');f.accept='.json,application/json';f.onchange=async()=>{if(f.files[0])a.value=await f.files[0].text()};add(c,el('p','支持按日期导入；缺少选项时自动生成干扰项，请核对释义。','muted'),f,a,btn('导入',()=>{try{importWords(a.value)}catch(e){alert(e.message)}},'primary'));return c}
+function parseWordList(raw, review){let data=JSON.parse(raw);if(!/^\d{4}-\d{2}-\d{2}$/.test(data.date)||!Number.isFinite(Date.parse(data.date))||new Date(data.date).toISOString().slice(0,10)!==data.date||!Array.isArray(data.words)||!data.words.length)throw Error('需要有效 date 和非空 words 数组');let seen=new Set(),pool=[...data.words.map(w=>w.meaning),...fallback].filter(x=>typeof x==='string'&&x.trim());let list=data.words.map(w=>{if(typeof w.word!=='string'||!w.word.trim()||typeof w.meaning!=='string'||!w.meaning.trim())throw Error('每个单词必须有 word 和 meaning');let word=w.word.trim(),meaning=w.meaning.trim(),k=word.toLowerCase();if(seen.has(k))throw Error('重复单词：'+word);seen.add(k);let options=w.options;if(options===undefined)options=shuffle([meaning,...shuffle([...new Set(pool)].filter(x=>x!==meaning)).slice(0,3)]);if(!Array.isArray(options)||options.length!==4||new Set(options).size!==4||options.some(x=>typeof x!=='string'||!x.trim())||!options.includes(meaning))throw Error(word+' 的选项必须为四个不同释义，包含 meaning');let correctIndex=options.indexOf(meaning);if(w.correctIndex!==undefined&&w.correctIndex!==correctIndex)throw Error(word+' 的 correctIndex 与 meaning 不一致');return {id:uid(),word,meaning,options,correctIndex,phonetic:String(w.phonetic||''),partOfSpeech:String(w.partOfSpeech||''),example:String(w.example||''),note:String(w.note||''),review}});
+return {date:data.date, words:list};
+}
+function importWords(raw, review){
+  const incoming = parseWordList(raw, review);
+  const words = s.words[incoming.date] ??= [];
+  const byWord = new Map(words.map(word => [word.word.toLowerCase(), word]));
+  let added = 0;
+  for (const word of incoming.words) {
+    const existing = byWord.get(word.word.toLowerCase());
+    if (existing) {
+      existing.review = review;
+    } else {
+      words.push(word);
+      added++;
+    }
+  }
+  date = incoming.date;
+  $('date').value = date;
+  cursor = 0;
+  filter = review ? 'review' : 'new';
+  page = 'cet';
+  save();
+  render();
+  alert(`${date} 已导入${review ? '旧词' : '新词'}。新增 ${added} 个，已有 ${incoming.words.length - added} 个。`);
+}
+function upload(){
+  const c = card('导入单词');
+  const columns = el('div', undefined, 'grid');
+  for (const [review, label] of [[false, '新词'], [true, '旧词']]) {
+    const panel = card(label);
+    const input = field('', '选择' + label + ' JSON 文件', 'file');
+    input.accept = '.json,application/json';
+    const data = area('', '粘贴' + label + ' JSON 数据');
+    input.onchange = async () => {
+      data.value = '';
+      if (!input.files[0]) return;
+      try { data.value = await input.files[0].text(); }
+      catch { alert('读取文件失败，请重新选择。'); }
+    };
+    add(panel, input, data, btn('导入' + label, () => {
+      try { importWords(data.value, review); }
+      catch (e) { alert(e.message); }
+    }, 'primary'));
+    columns.append(panel);
+  }
+  return add(c, el('p','新词和旧词按词表里的日期加入当天练习。重复词会归到本次选择的类别，并保留答题记录。','muted'), columns);
+}
 function records(group){let c=card(group==='cet'?'真题 / 错题本':'错题 / 知识点'),type=el('select');for(let t of (group==='cet'?['真题','错题']:['错题','知识点']))type.append(el('option',t));let a=area('','记录题目、得分、错误原因或知识点');add(c,type,a,btn('保存记录',()=>{if(a.value.trim()){s.records.push({id:uid(),group,date,type:type.value,text:a.value.trim()});save();render()}}));for(let r of s.records.filter(x=>x.group===group&&x.date===date)){add(c,el('p',r.type+' · '+r.text),btn('删除记录',()=>{if(confirm('删除记录？')){s.records=s.records.filter(x=>x.id!==r.id);save();render()}}))}if(group==='cet'){c.append(el('h3','待复习单词'));for(let [w,m] of Object.entries(s.mastery))if(m.status==='待复习')c.append(el('p',w+' · '+m.date))}return c}
 function items(kind){let c=card(kind==='courses'?'课程列表':'科目计划'),arr=s[kind],grid=el('div',undefined,'grid');for(let x of arr){let p=card(x.name),n=field(x.name,'名称'),plan=area(x.plan,'复习计划'),pr=field(x.progress,'进度 0–100','number');pr.min=0;pr.max=100;add(p,bar(x.progress),labeled('名称',n),labeled('计划',plan),labeled('进度 %',pr));let d,l,no;if(kind==='courses'){d=field(x.date,'考试日期','date');l=field(x.link,'资料链接','url');no=area(x.note,'课程笔记');add(p,el('p',days(x.date)),labeled('考试日期',d),labeled('资料链接',l),no);try{let u=new URL(x.link);if(['https:','http:'].includes(u.protocol)){let a=el('a','打开资料');a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';p.append(a)}}catch{}}add(p,add(el('div',undefined,'line'),btn('保存',()=>{x.name=n.value.trim()||x.name;x.plan=plan.value;x.progress=Math.max(0,Math.min(100,Number(pr.value)||0));if(d)Object.assign(x,{date:d.value,link:l.value,note:no.value});save();render()},'primary'),btn('删除',()=>{if(confirm('删除此项？')){s[kind]=arr.filter(y=>y.id!==x.id);save();render()}})));grid.append(p)}let n=field('','新增名称');add(c,grid,add(el('div',undefined,'line'),n,btn('新增',()=>{if(n.value.trim()){arr.push({id:uid(),name:n.value.trim(),plan:'',progress:0,date:'',link:'',note:''});save();render()}})));return c}
 function config(grad=false){let c=card(grad?'考研目标':'考试设置'),fields=grad?[['school','目标院校'],['major','目标专业'],['graduate','考研日期','date'],['stage','阶段目标'],['stageProgress','阶段进度 %','number']]:[['cet','四六级日期','date']];let inputs=fields.map(([k,t,type])=>{let n=field(s.settings[k],t,type);c.append(labeled(t,n));return [k,n]});if(grad)c.append(bar(s.settings.stageProgress));c.append(btn('保存设置',()=>{for(let [k,n] of inputs)s.settings[k]=k==='stageProgress'?Math.max(0,Math.min(100,Number(n.value)||0)):n.value;save();render()},'primary'));return c}
